@@ -1,21 +1,37 @@
 #!/usr/bin/env bash
 # instalar-servidor.sh
-# Este script se debe ejecutar directamente en el servidor, sin necesidad de especificar IP ni usuario remoto.
+# Este script se debe ejecutar directamente en el servidor.
 
 set -euo pipefail
 
-# Verificar si OpenSSH está instalado, si no, instalarlo
+echo "=== VERIFICANDO E INSTALANDO OPENSSH ==="
 if ! command -v ssh >/dev/null 2>&1; then
-  echo "=== INSTALANDO OPENSSH ==="
+  echo "Instalando OpenSSH..."
   sudo apt-get update -y
   sudo apt-get install -y openssh-server
-  sudo systemctl enable --now ssh
-  echo "OpenSSH instalado y habilitado."
 else
   echo "OpenSSH ya está instalado."
 fi
 
-# Actualización del sistema
+# Asegurar que SSH use el puerto 22
+if grep -qE '^#?Port ' /etc/ssh/sshd_config; then
+  sudo sed -i 's/^#\?Port .*/Port 22/' /etc/ssh/sshd_config
+else
+  echo "Port 22" | sudo tee -a /etc/ssh/sshd_config >/dev/null
+fi
+
+# Verificar si el puerto 22 está ocupado
+if sudo lsof -i:22 >/dev/null 2>&1; then
+  echo "⚠️ Advertencia: El puerto 22 ya está en uso. Se intentará reiniciar SSH de todas formas..."
+else
+  echo "✅ El puerto 22 está libre."
+fi
+
+# Habilitar y reiniciar el servicio SSH
+sudo systemctl enable ssh
+sudo systemctl restart ssh
+sudo systemctl status ssh --no-pager || true
+
 echo "=== ACTUALIZANDO SISTEMA ==="
 sudo apt-get update -y
 sudo apt-get upgrade -y
@@ -65,7 +81,7 @@ done
 
 echo "=== CONFIGURANDO FIREWALL (UFW) ==="
 if command -v ufw >/dev/null 2>&1; then
-  sudo ufw allow OpenSSH || true
+  sudo ufw allow 22/tcp || true
   sudo ufw allow 'Apache Full' || true
   sudo ufw --force enable || true
 fi
@@ -75,5 +91,5 @@ echo "<?php phpinfo(); ?>" | sudo tee /var/www/html/info.php >/dev/null
 sudo chown -R www-data:www-data /var/www/html
 sudo systemctl reload apache2
 
-echo "✅ Instalación y actualización completadas correctamente."
-echo "Visita http://<tu_servidor>/info.php para probar PHP."
+echo "✅ Instalación completada correctamente."
+echo "Puedes acceder por SSH (puerto 22) o visitar http://<tu_servidor>/info.php para probar PHP."
