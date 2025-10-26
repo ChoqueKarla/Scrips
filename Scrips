@@ -1,49 +1,58 @@
 #!/usr/bin/env bash
-# scripts.sh
-# Este script debe ejecutarse directamente en el servidor (no pide usuario@host)
-# Ejemplo de uso:
-#   chmod +x scripts.sh
-#   ./scripts.sh
+# instalar-servidor.sh
+# Este script se debe ejecutar directamente en el servidor, sin necesidad de especificar IP ni usuario remoto.
 
 set -euo pipefail
 
-echo "=== 🔄 ACTUALIZANDO EL SISTEMA ==="
-sudo apt update -y
-sudo apt upgrade -y
-sudo apt dist-upgrade -y
-sudo apt autoremove -y
-sudo apt clean
+# Verificar si OpenSSH está instalado, si no, instalarlo
+if ! command -v ssh >/dev/null 2>&1; then
+  echo "=== INSTALANDO OPENSSH ==="
+  sudo apt-get update -y
+  sudo apt-get install -y openssh-server
+  sudo systemctl enable --now ssh
+  echo "OpenSSH instalado y habilitado."
+else
+  echo "OpenSSH ya está instalado."
+fi
 
-echo "=== ⚙️ INSTALANDO DEPENDENCIAS BÁSICAS ==="
-sudo apt install -y software-properties-common ca-certificates lsb-release apt-transport-https curl gnupg
+# Actualización del sistema
+echo "=== ACTUALIZANDO SISTEMA ==="
+sudo apt-get update -y
+sudo apt-get upgrade -y
+sudo apt-get dist-upgrade -y
+sudo apt-get autoremove -y
+sudo apt-get clean
 
-echo "=== 🧩 AGREGANDO REPOSITORIO PHP (Ondřej Surý) ==="
+echo "=== INSTALANDO DEPENDENCIAS BÁSICAS ==="
+sudo apt-get install -y software-properties-common ca-certificates lsb-release apt-transport-https curl gnupg
+
+echo "=== AGREGANDO REPOSITORIO PHP ==="
 if ! sudo add-apt-repository -y ppa:ondrej/php; then
   echo "⚠️ No se pudo añadir el PPA ondrej/php. Continuando..."
 fi
 
-sudo apt update -y
+sudo apt-get update -y
 
 PHP_VERSION="8.4"
 
-echo "=== 🌐 INSTALANDO APACHE, PHP Y MARIADB ==="
-sudo apt install -y apache2 mariadb-server mariadb-client \
+echo "=== INSTALANDO APACHE, PHP Y MARIADB ==="
+sudo apt-get install -y apache2 mariadb-server mariadb-client \
   "php${PHP_VERSION}" "libapache2-mod-php${PHP_VERSION}" \
   "php${PHP_VERSION}-fpm" "php${PHP_VERSION}-mysqli" \
   "php${PHP_VERSION}-xml" "php${PHP_VERSION}-mbstring" \
   "php${PHP_VERSION}-curl" "php${PHP_VERSION}-zip" "php${PHP_VERSION}-gd" || {
     echo "⚠️ No se pudo instalar PHP ${PHP_VERSION}, instalando versión disponible..."
-    sudo apt install -y php libapache2-mod-php php-mysql php-xml php-mbstring php-curl php-zip php-gd
+    sudo apt-get install -y php libapache2-mod-php php-mysql php-xml php-mbstring php-curl php-zip php-gd
   }
 
-echo "=== 🚀 HABILITANDO SERVICIOS ==="
+echo "=== HABILITANDO SERVICIOS ==="
 sudo systemctl enable --now apache2
 sudo systemctl enable --now mariadb || true
 if command -v php${PHP_VERSION}-fpm >/dev/null 2>&1; then
   sudo systemctl enable --now php${PHP_VERSION}-fpm || true
 fi
 
-echo "=== 👥 CREANDO USUARIOS DEL SISTEMA ==="
+echo "=== CREANDO USUARIOS DEL SISTEMA ==="
 for u in noelia jaime; do
   if id "$u" >/dev/null 2>&1; then
     echo "Usuario $u ya existe, saltando."
@@ -54,18 +63,17 @@ for u in noelia jaime; do
   fi
 done
 
-echo "=== 🔒 CONFIGURANDO FIREWALL (UFW) ==="
+echo "=== CONFIGURANDO FIREWALL (UFW) ==="
 if command -v ufw >/dev/null 2>&1; then
   sudo ufw allow OpenSSH || true
   sudo ufw allow 'Apache Full' || true
   sudo ufw --force enable || true
 fi
 
-echo "=== 🧾 CREANDO PÁGINA DE PRUEBA PHP ==="
+echo "=== CREANDO PÁGINA DE PRUEBA PHP ==="
 echo "<?php phpinfo(); ?>" | sudo tee /var/www/html/info.php >/dev/null
 sudo chown -R www-data:www-data /var/www/html
 sudo systemctl reload apache2
 
-echo "✅ Instalación completada con éxito."
-echo "👉 Prueba en tu navegador: http://$(hostname -I | awk '{print $1}')/info.php"
-echo "Usuarios creados: noelia / jaime (contraseña igual al nombre)"
+echo "✅ Instalación y actualización completadas correctamente."
+echo "Visita http://<tu_servidor>/info.php para probar PHP."
