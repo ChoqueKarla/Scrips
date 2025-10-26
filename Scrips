@@ -1,0 +1,87 @@
+#!/usr/bin/env bash
+# instalar-servidor.sh
+# Uso: ./instalar-servidor.sh usuario@host
+# Ejemplo: ./instalar-servidor.sh ubuntu@203.0.113.5
+
+set -euo pipefail
+
+if [ $# -ne 1 ]; then
+  echo "Uso: $0 usuario@host"
+  exit 2
+fi
+
+REMOTE="$1"
+SSH_OPTS="-o BatchMode=yes -o ConnectTimeout=10 -o StrictHostKeyChecking=no"
+
+read -r -d '' REMOTE_SCRIPT <<'REMOTE_EOF'
+set -euxo pipefail
+
+echo "=== ACTUALIZANDO SISTEMA ==="
+sudo apt-get update -y
+sudo apt-get upgrade -y
+sudo apt-get dist-upgrade -y
+sudo apt-get autoremove -y
+sudo apt-get clean
+
+echo "=== INSTALANDO DEPENDENCIAS BÁSICAS ==="
+sudo apt-get install -y software-properties-common ca-certificates lsb-release apt-transport-https curl gnupg
+
+echo "=== AGREGANDO REPOSITORIO PHP ==="
+if ! sudo add-apt-repository -y ppa:ondrej/php; then
+  echo "⚠️ No se pudo añadir el PPA ondrej/php. Continuando..."
+fi
+
+sudo apt-get update -y
+
+PHP_VERSION="8.4"
+
+echo "=== INSTALANDO APACHE, PHP Y MARIADB ==="
+sudo apt-get install -y apache2 mariadb-server mariadb-client \
+  "php${PHP_VERSION}" "libapache2-mod-php${PHP_VERSION}" \
+  "php${PHP_VERSION}-fpm" "php${PHP_VERSION}-mysqli" \
+  "php${PHP_VERSION}-xml" "php${PHP_VERSION}-mbstring" \
+  "php${PHP_VERSION}-curl" "php${PHP_VERSION}-zip" "php${PHP_VERSION}-gd" || {
+    echo "⚠️ No se pudo instalar PHP ${PHP_VERSION}, instalando versión disponible..."
+    sudo apt-get install -y php libapache2-mod-php php-mysql php-xml php-mbstring php-curl php-zip php-gd
+  }
+
+echo "=== HABILITANDO SERVICIOS ==="
+sudo systemctl enable --now apache2
+sudo systemctl enable --now mariadb || true
+if command -v php${PHP_VERSION}-fpm >/dev/null 2>&1; then
+  sudo systemctl enable --now php${PHP_VERSION}-fpm || true
+fi
+
+echo "=== CREANDO USUARIOS DEL SISTEMA ==="
+for u in noelia jaime; do
+  if id "$u" >/dev/null 2>&1; then
+    echo "Usuario $u ya existe, saltando."
+  else
+    sudo useradd -m -s /bin/bash "$u"
+    echo "${u}:${u}" | sudo chpasswd
+    echo "Usuario $u creado con contraseña '$u'"
+  fi
+done
+
+echo "=== CONFIGURANDO FIREWALL (UFW) ==="
+if command -v ufw >/dev/null 2>&1; then
+  sudo ufw allow OpenSSH || true
+  sudo ufw allow 'Apache Full' || true
+  sudo ufw --force enable || true
+fi
+
+echo "=== CREANDO PÁGINA DE PRUEBA PHP ==="
+echo "<?php phpinfo(); ?>" | sudo tee /var/www/html/info.php >/dev/null
+sudo chown -R www-data:www-data /var/www/html
+sudo systemctl reload apache2
+
+echo "✅ Instalación y actualización completadas correctamente."
+echo "Visita http://<tu_servidor>/info.php para probar PHP."
+REMOTE_EOF
+
+echo "Conectando a ${REMOTE} y ejecutando instalación..."
+ssh ${SSH_OPTS} "${REMOTE}" bash -s <<REMOTE
+$REMOTE_SCRIPT
+REMOTE
+
+echo "✅ Script completado en el servidor ${REMOTE}."
